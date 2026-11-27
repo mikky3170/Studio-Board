@@ -1,4 +1,4 @@
-// [稼働Ver 作業版 Rev.9] チャット時系列バグ修正、一括保存Markdown完全復元パーサー、年月自動化ガード、3段階思考スタンス（temperature連動）実装
+// [稼働Ver 作業版 Rev.13] 判断材料・比較表の初回自動生成パイプライン追加（空振り根絶）、チャット実在テーブル最優先採用、Mermaid高コントラスト維持
 
 const PRIMARY_MODEL = 'gemini-3.5-flash-lite';
 const FALLBACK_MODEL = 'gemini-flash-lite-latest';
@@ -33,8 +33,8 @@ const THINKING_MODES = {
   }
 };
 
-// デフォルトの思考キャンバス初期テンプレート
-const DEFAULT_CANVAS_TEMPLATE = `# 思考キャンバス\n\nここに議論の論点、決定事項、比較表、システム構成図がスマートに整理されます。\n\n### 【現在の目的・ゴール】\n- （右側のチャットで自由に壁打ちを行い、話が一段落したら上の「更新」ボタンを押してください）\n\n### 【決定事項・確定方針】\n- \n\n### 【ビジュアル構成・図解・比較表】\n（キャンバスが会話全体を読み解き、フローチャートやマインドマップ、比較表を自動構築します）\n\n### 【現在検討中の論点】\n- \n\n### 【保留・今後の課題・ToDo】\n- `;
+// デフォルトの思考キャンバス初期テンプレート（見える化・判断ナビゲーション型）
+const DEFAULT_CANVAS_TEMPLATE = `# 思考キャンバス\n\nここに議論の論点、検討の順番（ロードマップ）、比較表がスマートに見える化・整理されます。\n\n### 【現在の目的・ゴール】\n- （右側のチャットで自由に壁打ちを行い、話が一段落したら上の「更新」ボタンを押してください）\n\n### 【意思決定の手順・ロードマップ】\n（何をどういう順番で決めるべきか、検討ステップのフローチャートがここに自動構築されます）\n\n### 【判断材料・比較表（チャット連携）】\n（チャット内で議論された比較表や検討データが、そのまま漏れなくここに集約されます）\n\n### 【確定した方針・ユーザーの決断】\n- （※ユーザー自身がチャットで明確に「これにする」と決めたことだけがここに記録されます。AIが勝手に決めることはありません）\n\n### 【現在検討中のステップ ＆ 次に答えるべき問い】\n- `;
 
 // アプリケーション状態
 const state = {
@@ -129,19 +129,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   initEventListeners();
   initSpeechRecognition();
   await renderCanvas();
-  await renderChatHistory(); // 非同期で順序保証描画
+  await renderChatHistory();
   autoResizeTextarea();
   updateReadyStatus();
 });
 
-// Mermaid.js 初期化
+// Mermaid.js 公式非破壊初期化（安全な標準テーマ適用＆文字潰れ防止）
 function initMermaid() {
   if (typeof mermaid !== 'undefined') {
     mermaid.initialize({
       startOnLoad: false,
-      theme: state.currentTheme === 'dark' ? 'dark' : 'default',
+      theme: state.currentTheme === 'dark' ? 'dark' : 'neutral',
       securityLevel: 'loose',
       fontFamily: 'Inter, Noto Sans JP, sans-serif',
+      fontSize: 14,
+      flowchart: {
+        htmlLabels: true,
+        useMaxWidth: true,
+        nodeSpacing: 45,
+        rankSpacing: 45,
+        curve: 'basis',
+        padding: 16
+      },
       suppressErrorRendering: true
     });
   }
@@ -153,16 +162,8 @@ function applyTheme(themeName) {
   document.body.className = `theme-${themeName}`;
   DOM.selectTheme.value = themeName;
   localStorage.setItem(STORAGE_KEY_THEME, themeName);
-
-  if (typeof mermaid !== 'undefined') {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: themeName === 'dark' ? 'dark' : 'default',
-      securityLevel: 'loose',
-      fontFamily: 'Inter, Noto Sans JP, sans-serif',
-      suppressErrorRendering: true
-    });
-  }
+  initMermaid();
+  renderCanvas();
 }
 
 // 思考スタンス切り替え
@@ -229,28 +230,23 @@ function loadStoredSettings() {
 
 // イベントリスナー登録
 function initEventListeners() {
-  // 一括保存 ＆ 復元（ヘッダー右側）
   DOM.btnDownloadAll.addEventListener('click', downloadAllSessionAsMarkdown);
   DOM.btnRestoreSession.addEventListener('click', () => DOM.fileRestoreInput.click());
   DOM.fileRestoreInput.addEventListener('change', handleRestoreFileSelect);
 
-  // テーマ切り替え
   DOM.selectTheme.addEventListener('change', (e) => {
     applyTheme(e.target.value);
     setUnifiedStatus('info', `テーマを「${e.target.selectedOptions[0].text}」に変更しました`, 'fa-palette', 3);
   });
 
-  // 思考スタンス切り替え
   DOM.selectThinkingMode.addEventListener('change', (e) => {
     applyThinkingMode(e.target.value);
   });
 
-  // 操作ガイドモーダル
   DOM.btnOpenGuide.addEventListener('click', openGuideModal);
   DOM.btnCloseGuide.addEventListener('click', closeGuideModal);
   DOM.btnOkGuide.addEventListener('click', closeGuideModal);
 
-  // 図解拡大モーダル
   DOM.btnCloseZoom.addEventListener('click', closeDiagramZoomModal);
   DOM.diagramZoomModal.addEventListener('click', (e) => {
     if (e.target === DOM.diagramZoomModal) closeDiagramZoomModal();
@@ -259,14 +255,12 @@ function initEventListeners() {
     if (e.key === 'Escape') closeDiagramZoomModal();
   });
 
-  // 設定モーダル
   DOM.btnOpenSettings.addEventListener('click', openSettingsModal);
   DOM.btnCloseSettings.addEventListener('click', closeSettingsModal);
   DOM.btnCancelSettings.addEventListener('click', closeSettingsModal);
   DOM.btnSaveSettings.addEventListener('click', saveSettings);
   DOM.btnToggleKeyVisibility.addEventListener('click', toggleKeyVisibility);
 
-  // キャンバス操作
   DOM.toggleCanvasAuto.addEventListener('change', (e) => {
     state.isCanvasAutoSync = e.target.checked;
     setUnifiedStatus(
@@ -283,7 +277,6 @@ function initEventListeners() {
   DOM.btnClearCanvas.addEventListener('click', clearCanvasContent);
   DOM.canvasEditor.addEventListener('input', handleCanvasEditorInput);
 
-  // キャンバステキスト選択引用
   DOM.canvasPreview.addEventListener('mouseup', handleCanvasTextSelection);
   DOM.btnQuoteToChat.addEventListener('click', applyQuoteToChat);
   document.addEventListener('mousedown', (e) => {
@@ -292,7 +285,6 @@ function initEventListeners() {
     }
   });
 
-  // チャット操作
   DOM.toggleSearchGrounding.addEventListener('change', (e) => {
     state.isSearchGroundingActive = e.target.checked;
     if (state.isSearchGroundingActive) {
@@ -303,7 +295,6 @@ function initEventListeners() {
   });
   DOM.btnClearChat.addEventListener('click', clearChatHistory);
 
-  // クイック指示チップのクリック
   DOM.quickChips.forEach(chip => {
     chip.addEventListener('click', () => {
       if (state.isBusy) return;
@@ -312,16 +303,13 @@ function initEventListeners() {
     });
   });
 
-  // ファイル添付
   DOM.fileInput.addEventListener('change', handleFileSelect);
   DOM.btnRemoveAttachment.addEventListener('click', removeAttachment);
   DOM.chatInput.addEventListener('paste', handlePasteImage);
   initDragAndDrop();
 
-  // 音声入力
   DOM.btnVoiceInput.addEventListener('click', toggleVoiceRecording);
 
-  // メッセージ送信
   DOM.btnSendMessage.addEventListener('click', handleSendMessage);
   DOM.chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -531,10 +519,15 @@ function unescapeHtml(html) {
   return txt.value;
 }
 
-// Mermaidコード自動修復サニタイザー
+// Mermaidコード自動修復サニタイザー（文字潰れ・ピンク塗りつぶし等のインラインスタイルを根絶）
 function sanitizeMermaidCode(rawText) {
   let clean = unescapeHtml(rawText);
   clean = clean.replace(/^```mermaid\s*/i, '').replace(/```$/i, '').trim();
+
+  // 視認性を破壊するインラインclassDefやstyleの指定を完全除去（システムの高コントラストCSSを優先）
+  clean = clean.replace(/classDef\s+[\s\S]*?(?=[\r\n]|$)/gi, '');
+  clean = clean.replace(/class\s+[\s\S]*?(?=[\r\n]|$)/gi, '');
+  clean = clean.replace(/style\s+[\s\S]*?(?=[\r\n]|$)/gi, '');
 
   clean = clean.replace(/\(\("([\s\S]*?)"\)\)/g, (match, p1) => {
     return `(("${p1.replace(/\r?\n/g, '<br/>')}"))`;
@@ -546,7 +539,7 @@ function sanitizeMermaidCode(rawText) {
     return `["${p1.replace(/\r?\n/g, '<br/>')}"]`;
   });
 
-  return clean;
+  return clean.trim();
 }
 
 // Mermaid個別安全レンダリング処理
@@ -711,9 +704,7 @@ function downloadAllSessionAsMarkdown() {
   setUnifiedStatus('ready', '一括バックアップを保存しました', 'fa-box-archive', 3);
 }
 
-// ========================================================
 // 一括保存Markdownファイルの読み戻し・完全復元パーサー
-// ========================================================
 function handleRestoreFileSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -735,7 +726,6 @@ function handleRestoreFileSelect(e) {
 }
 
 async function restoreSessionFromMarkdown(content) {
-  // 1. キャンバスセクションの抽出
   const canvasHeader = '## 思考キャンバス（論点・結論ボード）';
   const chatHeader = '## 壁打ちチャット全履歴';
   const divider = '---';
@@ -752,13 +742,11 @@ async function restoreSessionFromMarkdown(content) {
     dividerIndex
   ).trim();
 
-  // 2. チャット履歴セクションの抽出とパース
   const chatStartIndex = content.indexOf(chatHeader, dividerIndex);
   const restoredChatHistory = [];
 
   if (chatStartIndex !== -1) {
     const chatSection = content.substring(chatStartIndex + chatHeader.length).trim();
-    // 各発言「### #1 あなた」または「### #2 Gemini」で分割
     const msgRegex = /###\s*#\d+\s+(あなた|Gemini)[\r\n]+([\s\S]*?)(?=(?:###\s*#\d+\s+(?:あなた|Gemini)|$))/gi;
     let match;
 
@@ -772,7 +760,6 @@ async function restoreSessionFromMarkdown(content) {
     }
   }
 
-  // 3. アプリケーションState & LocalStorageへの完全復元反映
   state.canvasMarkdown = restoredCanvasMarkdown || DEFAULT_CANVAS_TEMPLATE;
   state.chatHistory = restoredChatHistory;
 
@@ -780,7 +767,6 @@ async function restoreSessionFromMarkdown(content) {
   localStorage.setItem(STORAGE_KEY_CANVAS, state.canvasMarkdown);
   localStorage.setItem(STORAGE_KEY_CHAT, JSON.stringify(state.chatHistory));
 
-  // 4. 画面再描画
   await renderCanvas();
   await renderChatHistory();
 
@@ -943,7 +929,6 @@ async function stopVoiceRecording(shouldProcess = true) {
     DOM.chatInput.value = existing ? `${existing} ${formatted}` : formatted;
     autoResizeTextarea();
 
-    // 確定時にグリーン発光演出
     DOM.chatInput.classList.remove('highlight-green-pulse');
     void DOM.chatInput.offsetWidth;
     DOM.chatInput.classList.add('highlight-green-pulse');
@@ -984,7 +969,6 @@ async function renderChatHistory() {
   }
 
   DOM.chatMessages.innerHTML = '';
-  // 順序逆転を防ぐため for...of で順番に確実に await 実行
   for (let idx = 0; idx < state.chatHistory.length; idx++) {
     const msg = state.chatHistory[idx];
     await appendMessageToDOM(msg.role, msg.text, msg.image, false, idx);
@@ -1077,7 +1061,6 @@ async function handleSendMessage() {
   try {
     await ensureRateLimitInterval();
 
-    // 選択中の思考スタンス（ひらめき/標準/厳密）の設定を取得
     const modeConfig = THINKING_MODES[state.thinkingMode] || THINKING_MODES.balanced;
     const dynamicSystemInstruction = CHAT_SYSTEM_INSTRUCTION + modeConfig.instruction;
 
@@ -1136,40 +1119,32 @@ const CHAT_SYSTEM_INSTRUCTION = `あなたはユーザーの最高の壁打ち�
 型にはまった定型要約は不要です。質問・相談に対して、常に直接的かつ具体的に回答文章・考察・深掘り・最新の知見を展開してください。
 ※図解（Mermaid）の作成に気を取られる必要はありません。ユーザーの言葉の本質を捉え、知的なディスカッションに没頭してください（直感的な説明のために自発的に図を交えることは歓迎します）。`;
 
-// 思考キャンバス専用プロンプト
-const CANVAS_UPDATE_SYSTEM_INSTRUCTION = `あなたは極めて優秀なエグゼクティブ・ドキュメント作成担当です。
-提供されるこれまでの壁打ち会話ログ全体を冷静に俯瞰し、左画面の「思考キャンバス」を最新状態に構造化してリライトしてください。
+// キャンバス専用プロンプト（ユーザー主権型：勝手な決定の厳格禁止 ＆ 判断手順ナビゲーション）
+const CANVAS_LOGIC_SYSTEM_INSTRUCTION = `あなたはユーザーの「思考の見える化・判断ナビゲーション盤」を作成する専門エンジニアです。
+キャンバスは【結論を急ぐ場】ではなく、【何をどういう順番で決めるべきか（手順・ロードマップ）】と【各ステップでの判断材料（比較検討）】を美しく整理してユーザーに提示するダッシュボードです。
 
-【最重要要件：ビジュアル構成・図解・比較表の絶対配置】
-キャンバスの「### 【ビジュアル構成・図解・比較表】」は必須セクションです。言葉だけでは説明が伝わりにくいため、人間がパッと見て一瞬で全体像が理解できるよう、以下のいずれかを【必ず完全な形で構築】して配置してください：
-1. 会話の中に選択肢や製品、手法の比較がある場合: 
-   必ず「Markdownテーブル形式の美しい比較表」を作成して配置すること。
-2. 会話の中に構造、データフロー、市場の進化軸、手順のつながりがある場合: 
-   必ず「Mermaid記法（\`\`\`mermaid\\nflowchart TD ...\\n\`\`\` または \`\`\`mermaid\\nmindmap ...\\n\`\`\`）」を用いて直感的な図解を作成して配置すること。
-※Mermaid記法ルール: 構文エラーを防止するため、各ノードの日本語ラベルは必ず A["日本語ラベル"] のように半角ダブルクォーテーションで囲み、丸カッコ root(("タイトル")) 内部に直接Enter改行を入れてはならない（改行は <br/> を使用）。
-※このセクションを省略したり、「〜配置されます」等のテキストだけで済ませる手抜きは一切禁止する。
+【最重要ルール：AIによる勝手な決定・決めつけの完全禁止】
+- ユーザー自身がチャット内で明確に「これにする」「これで決定する」と宣言・承諾していない事項は、絶対に【確定した方針・ユーザーの決断】に書いてはなりません。
+- AI側が強く推奨した案や、現在比較検討中の事項は、すべて「検討中の論点」として扱い、ユーザーの判断待ちであることを明記してください。勝手に決定事項へ格上げすることは重大なバグとみなします。
 
-基本レイアウト基準：
-# 思考キャンバス
+出力フォーマット（必ず以下のセクション構成を厳守してください）：
 
 ### 【現在の目的・ゴール】
-- （議論の前提やテーマ）
+- ユーザーの本音の目的や動機、絶対に避けたい失敗（ガッカリ感）を明確に記述する。
 
-### 【決定事項・確定方針】
-- （確定した内容、方針の結論）
+### 【確定した方針・ユーザーの決断】
+- 【ユーザーが明示的に決断・合意した事項のみ】を箇条書きで記載する。
+- まだユーザーが選定・決断を下していない場合は「- （※現在ステップ1の比較検討中。ユーザーの決断待ち）」とだけ明記し、絶対にAIの推奨案で埋めないこと。
 
-### 【ビジュアル構成・図解・比較表】
-（※会話ログの内容を最も直感的に表現したMermaid図、またはMarkdown比較表を必ず完全配置すること）
-
-### 【現在検討中の論点】
-- （今話し合っている最重要テーマ）
-
-### 【保留・今後の課題・ToDo】
-- （次のアクション）
+### 【現在検討中のステップ ＆ ユーザーへの問いかけ】
+- **[いま検討中の論点]**:
+  - （例：裁断機・スキャナーの選定において、初期投資と手間のどちらを優先するか等、具体的な機種名・数字を交えて対立軸を記述）
+- **[次にチャットでユーザーが決めるべき問い]**:
+  - ❓ （ユーザーが比較表やロードマップを見て、右のチャットで次に答えるべき具体的な選択の問いを1〜2点提示する）
 
 ※無駄な挨拶や解説は出力せず、Markdown本文のみを出力してください。`;
 
-// Gemini API 呼び出しコアロジック（思考スタンス温度適用）
+// Gemini API 呼び出しコアロジック
 async function callGeminiAPI(contents, systemInstructionText = null, useSearch = false, temperatureValue = 0.7) {
   const models = [PRIMARY_MODEL, FALLBACK_MODEL];
   let lastError = null;
@@ -1254,43 +1229,40 @@ async function callGeminiAPI(contents, systemInstructionText = null, useSearch =
   throw lastError || new Error('すべてのGeminiモデルで呼び出しに失敗しました。');
 }
 
-// チャット履歴から最新の図解・表を回収
-function extractLatestVisualArtifactFromChat(chatHistory) {
+// チャット履歴から「全Markdown比較表」および「最新Mermaid」を無欠損で回収
+function extractVisualArtifactsFromChat(chatHistory) {
+  let latestMermaid = null;
+  const collectedTables = [];
+
+  // 直近のモデルメッセージから順に走査
   for (let i = chatHistory.length - 1; i >= 0; i--) {
     const msg = chatHistory[i];
     if (msg.role !== 'model' || !msg.text) continue;
 
-    const mermaidRegex = /```[\s]*mermaid[\r\n]+([\s\S]*?)```/i;
-    const mermaidMatch = msg.text.match(mermaidRegex);
-    if (mermaidMatch) {
-      return {
-        type: 'mermaid',
-        code: `\`\`\`mermaid\n${mermaidMatch[1].trim()}\n\`\`\``
-      };
+    // Mermaid図の回収（まだ拾っていなければ回収）
+    if (!latestMermaid) {
+      const mermaidMatch = msg.text.match(/```[\s]*mermaid[\r\n]+([\s\S]*?)```/i);
+      if (mermaidMatch) {
+        latestMermaid = `\`\`\`mermaid\n${sanitizeMermaidCode(mermaidMatch[1])}\n\`\`\``;
+      }
     }
 
-    const rawMermaidRegex = /(flowchart\s+[A-Za-z0-9_-]+|graph\s+[A-Za-z0-9_-]+|mindmap)[\r\n]+([\s\S]*?)([\r\n]{2,}|$)/i;
-    const rawMermaidMatch = msg.text.match(rawMermaidRegex);
-    if (rawMermaidMatch) {
-      return {
-        type: 'mermaid',
-        code: `\`\`\`mermaid\n${rawMermaidMatch[0].trim()}\n\`\`\``
-      };
-    }
-
-    const tableRegex = /\|(.+)\|[\r\n]+\|[-:| ]+\|[\r\n]+((\|.+|[\r\n]*)+)/;
-    const tableMatch = msg.text.match(tableRegex);
-    if (tableMatch) {
-      return {
-        type: 'table',
-        code: tableMatch[0].trim()
-      };
+    // チャット内のすべてのMarkdown表を漏れなく全件抽出
+    const tableRegex = /\|(.+)\|[\r\n]+\|[-:| ]+\|[\r\n]+((?:\|.+[\r\n]*)+)/g;
+    let tableMatch;
+    while ((tableMatch = tableRegex.exec(msg.text)) !== null) {
+      const fullTable = tableMatch[0].trim();
+      // 重複登録の防止
+      if (!collectedTables.some(t => t.includes(tableMatch[1].trim()))) {
+        collectedTables.unshift(fullTable); // 時系列順（古いものが上、新しいものが下）に整列
+      }
     }
   }
-  return null;
+
+  return { mermaid: latestMermaid, tables: collectedTables };
 }
 
-// キャンバス更新パイプライン
+// 思考キャンバス 統合更新パイプライン（ユーザー主権・判断ナビゲーション型）
 async function updateCanvasFromAI(isManual = false) {
   if (state.chatHistory.length === 0) {
     if (isManual) {
@@ -1303,36 +1275,100 @@ async function updateCanvasFromAI(isManual = false) {
 
   state.canvasBackupSnapshot = state.canvasMarkdown;
   DOM.canvasLoadingOverlay.style.display = 'flex';
-  DOM.canvasLoadingText.textContent = '論点整理とビジュアル図解を構造化中...';
-  setBusyLock(true, 'キャンバスを論理再整理中...');
+  DOM.canvasLoadingText.textContent = '思考のロードマップと比較表を整理中...';
+  setBusyLock(true, 'キャンバスを可視化同期中...');
 
   try {
     await ensureRateLimitInterval();
 
-    const latestVisual = extractLatestVisualArtifactFromChat(state.chatHistory);
-    let visualGuidance = '';
-
-    if (latestVisual) {
-      visualGuidance = `\n\n【必須指示：チャット内の最新図解を継承】\nチャットログ内に以下の完成版図解/比較表が存在します。このコードを省略・要約せず、キャンバスの「### 【ビジュアル構成・図解・比較表】」セクションに完全な形で組み込んで出力してください：\n\n${latestVisual.code}\n`;
-    } else {
-      visualGuidance = `\n\n【必須指示：自律的なビジュアル図解作成】\nチャットログ内にまだ図解が存在しません。会話全体の議論構造（対立軸・手順・構成・比較）を最も直感的に理解できるよう、あなたが責任を持って「Mermaid図（flowchart TD または mindmap）」または「Markdown比較表」をゼロから作成し、「### 【ビジュアル構成・図解・比較表】」セクションに必ず配置してください。\n`;
-    }
-
     const conversationLog = state.chatHistory.map((m) => `${m.role === 'user' ? 'ユーザー' : 'Gemini'}: ${m.text}`).join('\n\n');
-    const prompt = `以下はこれまでの会話ログと現在のキャンバスです。会話の進展を反映し、思考キャンバスを最新の論点、決定事項、そしてわかりやすい図解/比較表で構造化更新してください。${visualGuidance}\n\n【現在のキャンバス】:\n${state.canvasMarkdown}\n\n【会話ログ】:\n${conversationLog}`;
 
-    const result = await callGeminiAPI(
-      [{ role: 'user', parts: [{ text: prompt }] }],
-      CANVAS_UPDATE_SYSTEM_INSTRUCTION,
+    // 1. 論理テキスト生成（ユーザーの意思決定プロセスを尊重し、勝手な決定を一切排除）
+    const logicPrompt = `これまでの会話ログを分析し、ユーザーが「何をどういう順番で決めるべきか」の検討状況を整理してください。ユーザーが決めていない提案を勝手に決定事項に含めてはなりません。\n\n【会話ログ】:\n${conversationLog}`;
+    const logicResult = await callGeminiAPI(
+      [{ role: 'user', parts: [{ text: logicPrompt }] }],
+      CANVAS_LOGIC_SYSTEM_INSTRUCTION,
       false,
-      0.3 // キャンバス構造化はブレを抑えて安定出力
+      0.2
     );
 
-    if (result.finishReason === 'MAX_TOKENS' && result.text.length < 100) {
-      throw new Error('出力が途中で強制切断されました。');
+    const logicMarkdown = logicResult.text.trim();
+
+    // 2. 検討手順フローチャート（ロードマップ）の構築
+    // チャットから既存Mermaidがあるか確認し、ない場合は「意思決定の手順（Step 1→2→3）」のフローチャートを作成
+    const artifacts = extractVisualArtifactsFromChat(state.chatHistory);
+    let roadmapMermaid = artifacts.mermaid;
+
+    if (!roadmapMermaid) {
+      await ensureRateLimitInterval();
+      const roadmapPrompt = `以下の会話ログから、ユーザーがプロジェクトを完遂するために「何をどの順番で検討・決定していくべきか」のステップ手順（ロードマップ）をMermaid記法の flowchart TD で作成してください。
+※重要：styleやclassDef、色の指定は一切含めないでください。純粋なノード構造のみを出力してください。ノード内の日本語は A["ステップ名<br/>説明"] と囲んでください。\n\n【会話ログ】:\n${conversationLog}`;
+
+      const roadmapResult = await callGeminiAPI(
+        [{ role: 'user', parts: [{ text: roadmapPrompt }] }],
+        null,
+        false,
+        0.2
+      );
+      const generatedCode = roadmapResult.text.match(/```[\s]*mermaid[\r\n]+([\s\S]*?)```/i);
+      roadmapMermaid = generatedCode ? `\`\`\`mermaid\n${sanitizeMermaidCode(generatedCode[1])}\n\`\`\`` : `\`\`\`mermaid\nflowchart TD\n    Step1["ステップ1: 現状確認と基本対応"] --> Step2["ステップ2: 調整と深掘り"]\n    Step2 --> Step3["ステップ3: 解決・完了"]\n\`\`\``;
     }
 
-    state.canvasMarkdown = result.text.trim();
+    // 3. 判断材料・比較表セクションの構築
+    // チャット内の実在テーブルを最優先回収し、未存在の場合は会話文脈から客観的比較表をフォールバック自動生成
+    let tablesMarkdown = '';
+    if (artifacts.tables && artifacts.tables.length > 0) {
+      tablesMarkdown = artifacts.tables.join('\n\n');
+    } else {
+      // チャット内にまだMarkdownテーブルがない場合のフォールバック自動生成
+      await ensureRateLimitInterval();
+      const tableFallbackPrompt = `以下の会話ログを分析し、ユーザーが客観的な判断を下すための「判断材料・比較表」をMarkdownの表（Table）形式で作成してください。
+（例：選択肢の比較、メリット・デメリット、難易度・費用・所要時間、原因別の切り分け基準など、会話の主題に最も適した比較表を作成）
+※重要：AIが勝手に結論を決めつけず、判断のための客観的な基準を示す表にしてください。Markdownの表のみを出力してください。\n\n【会話ログ】:\n${conversationLog}`;
+
+      try {
+        const tableFallbackResult = await callGeminiAPI(
+          [{ role: 'user', parts: [{ text: tableFallbackPrompt }] }],
+          null,
+          false,
+          0.2
+        );
+        const tableMatch = tableFallbackResult.text.match(/\|(.+)\|[\r\n]+\|[-:| ]+\|[\r\n]+((?:\|.+[\r\n]*)+)/);
+        if (tableMatch) {
+          tablesMarkdown = tableMatch[0].trim();
+        } else {
+          tablesMarkdown = `_（右側のチャットで比較検討が進むと、ここに詳細な比較表が自動的にピン留めされます）_`;
+        }
+      } catch (tableErr) {
+        console.warn('Fallback table generation failed, defaulting to placeholder:', tableErr);
+        tablesMarkdown = `_（右側のチャットで比較検討が進むと、ここに詳細な比較表が自動的にピン留めされます）_`;
+      }
+    }
+
+    // 4. キャンバス全体の再構築（見える化・判断ナビゲーション型）
+    let finalCanvasMarkdown = '# 思考キャンバス\n\n';
+
+    const goalSection = extractSection(logicMarkdown, '【現在の目的・ゴール】');
+    const decisionSection = extractSection(logicMarkdown, '【確定した方針・ユーザーの決断】') || extractSection(logicMarkdown, '【決定事項・確定方針】');
+    const stepSection = extractSection(logicMarkdown, '【現在検討中のステップ ＆ ユーザーへの問いかけ】') || extractSection(logicMarkdown, '【現在検討中の論点（対立軸・トレードオフ）】') || extractSection(logicMarkdown, '【現在検討中の論点】');
+
+    if (goalSection) {
+      finalCanvasMarkdown += `### 【現在の目的・ゴール】\n${goalSection}\n\n`;
+    }
+
+    finalCanvasMarkdown += `### 【意思決定の手順・ロードマップ】\n${roadmapMermaid}\n\n`;
+
+    finalCanvasMarkdown += `### 【判断材料・比較表（チャット連携）】\n${tablesMarkdown}\n\n`;
+
+    if (decisionSection) {
+      finalCanvasMarkdown += `### 【確定した方針・ユーザーの決断】\n${decisionSection}\n\n`;
+    }
+
+    if (stepSection) {
+      finalCanvasMarkdown += `### 【現在検討中のステップ ＆ ユーザーへの問いかけ】\n${stepSection}\n`;
+    }
+
+    state.canvasMarkdown = finalCanvasMarkdown.trim();
     DOM.canvasEditor.value = state.canvasMarkdown;
     localStorage.setItem(STORAGE_KEY_CANVAS, state.canvasMarkdown);
     await renderCanvas();
@@ -1350,4 +1386,15 @@ async function updateCanvasFromAI(isManual = false) {
     DOM.canvasLoadingOverlay.style.display = 'none';
     setBusyLock(false);
   }
+}
+
+// Markdownセクション切り出しヘルパー
+function extractSection(markdown, sectionTitle) {
+  const pattern = new RegExp(`###\\s*${escapeRegExp(sectionTitle)}[\\r\\n]+([\\s\\S]*?)(?=(?:###\\s*【|$))`, 'i');
+  const match = markdown.match(pattern);
+  return match ? match[1].trim() : '';
+}
+
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
