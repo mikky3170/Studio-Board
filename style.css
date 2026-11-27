@@ -1,4 +1,4 @@
-/* [稼働Ver 作業版 Rev.8] タイトル中央絶対固定＆ステータス揺れ防止、保存/復元ボタン配置、思考スタンス別ネオンアクセントCSS */
+/* [稼働Ver 作業版 Rev.11] Mermaid全テーマ高コントラスト視認性完全保証、配色潰れ根絶CSS */
 
 :root {
   /* ========================================================
@@ -61,6 +61,13 @@
   --font-sans: 'Inter', 'Noto Sans JP', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   --header-height: 60px;
+
+  /* Mermaid高コントラスト視認性変数（ダーク用） */
+  --mermaid-node-bg: #1e293b;
+  --mermaid-node-border: #60a5fa;
+  --mermaid-node-text: #f8fafc;
+  --mermaid-edge-color: #94a3b8;
+  --mermaid-label-bg: #0f172a;
 }
 
 /* ========================================================
@@ -106,6 +113,13 @@ body.theme-light {
   --shadow-button: 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-button-primary: 0 4px 12px rgba(37, 99, 235, 0.25);
   --shadow-panel: 0 4px 20px rgba(0, 0, 0, 0.06);
+
+  /* Mermaid高コントラスト視認性変数（ライト用） */
+  --mermaid-node-bg: #ffffff;
+  --mermaid-node-border: #2563eb;
+  --mermaid-node-text: #0f172a;
+  --mermaid-edge-color: #475569;
+  --mermaid-label-bg: #e2e8f0;
 }
 
 /* ========================================================
@@ -151,6 +165,13 @@ body.theme-pop {
   --shadow-button: 0 2px 5px rgba(147, 51, 234, 0.1);
   --shadow-button-primary: 0 4px 14px rgba(236, 72, 153, 0.3);
   --shadow-panel: 0 6px 24px rgba(147, 51, 234, 0.08);
+
+  /* Mermaid高コントラスト視認性変数（ポップ用） */
+  --mermaid-node-bg: #ffffff;
+  --mermaid-node-border: #8b5cf6;
+  --mermaid-node-text: #1e1b4b;
+  --mermaid-edge-color: #a855f7;
+  --mermaid-label-bg: #fae8ff;
 }
 
 * {
@@ -268,7 +289,7 @@ body.theme-pop .version-badge {
   border-color: #fbcfe8;
 }
 
-/* 統合ステータスドック（タイトルの右に連結、最大幅設定で文字伸縮によるレイアウトシフト防止） */
+/* 統合ステータスドック */
 .unified-status-box {
   display: flex;
   align-items: center;
@@ -352,7 +373,7 @@ body.theme-pop .version-badge {
   box-shadow: 0 0 10px var(--danger-glow);
 }
 
-/* ヘッダー右側（人間工学配置：一括保存 → 復元 → テーマ → ガイド → 設定） */
+/* ヘッダー右側 */
 .header-right {
   display: flex;
   align-items: center;
@@ -514,7 +535,7 @@ body.theme-pop .theme-selector-box {
   gap: 8px;
 }
 
-/* 3段階思考スタンスセレクタ（ひらめき / 標準 / 厳密） */
+/* 3段階思考スタンスセレクタ */
 .thinking-mode-box {
   display: flex;
   align-items: center;
@@ -831,13 +852,15 @@ body.theme-pop .markdown-body th {
   color: #701a75;
 }
 
-/* Mermaid 図解コンテナ & 拡大ボタン */
+/* ========================================================
+   Mermaid 高コントラスト視認性完全保証スタイル
+   ======================================================== */
 .mermaid-wrapper {
   position: relative;
   margin: 22px 0;
 }
 .mermaid-container {
-  padding: 24px;
+  padding: 24px 18px;
   background: var(--bg-canvas-card);
   border: 1px solid var(--border-canvas);
   border-radius: var(--radius-lg);
@@ -846,9 +869,67 @@ body.theme-pop .markdown-body th {
   justify-content: center;
   overflow-x: auto;
 }
+
+/* SVG全体の描画領域を外側へ自然に解放 */
 .mermaid svg {
   max-width: 100%;
   height: auto;
+  overflow: visible !important;
+}
+
+/* ノード境界とテキストのクリッピング解除 */
+.mermaid .node,
+.mermaid .node rect,
+.mermaid .node circle,
+.mermaid .node polygon,
+.mermaid .label {
+  overflow: visible !important;
+}
+
+/* 全テーマでの高コントラスト文字色・背景色強制補正（ピンク潰れ等の完全防止） */
+.mermaid .node rect,
+.mermaid .node polygon,
+.mermaid .node circle {
+  fill: var(--mermaid-node-bg) !important;
+  stroke: var(--mermaid-node-border) !important;
+  stroke-width: 2px !important;
+}
+
+.mermaid .node .label,
+.mermaid .node foreignObject div,
+.mermaid .node text {
+  color: var(--mermaid-node-text) !important;
+  fill: var(--mermaid-node-text) !important;
+  font-weight: 600 !important;
+  font-family: var(--font-sans) !important;
+}
+
+.mermaid .edgePath path {
+  stroke: var(--mermaid-edge-color) !important;
+  stroke-width: 2px !important;
+}
+
+.mermaid .edgeLabel rect {
+  fill: var(--mermaid-label-bg) !important;
+  opacity: 0.9;
+}
+
+.mermaid .edgeLabel span {
+  color: var(--mermaid-node-text) !important;
+  font-weight: 600 !important;
+}
+
+/* ノード内部テキストの適切な行間と自然なパディング確保 */
+.mermaid .node foreignObject {
+  overflow: visible !important;
+}
+
+.mermaid .node foreignObject div {
+  line-height: 1.4 !important;
+  padding: 4px 8px !important;
+  text-align: center !important;
+  word-break: break-word !important;
+  box-sizing: border-box !important;
 }
 
 .btn-zoom-diagram {
