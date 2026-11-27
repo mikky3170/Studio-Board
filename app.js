@@ -1,4 +1,4 @@
-// [稼働Ver 作業版 Rev.13] 判断材料・比較表の初回自動生成パイプライン追加（空振り根絶）、チャット実在テーブル最優先採用、Mermaid高コントラスト維持
+// [稼働Ver 作業版 Rev.14] 写真添付時の停止・タイムアウト完全根絶：長辺1200px自動圧縮パイプライン、LocalStorage枯渇防止、判断材料表自動生成維持
 
 const PRIMARY_MODEL = 'gemini-3.5-flash-lite';
 const FALLBACK_MODEL = 'gemini-flash-lite-latest';
@@ -798,13 +798,14 @@ function applyQuoteToChat() {
   DOM.chatInput.focus();
 }
 
-// 添付ファイル処理
+// 添付ファイル処理（画像選択イベント）
 function handleFileSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
   processImageFile(file);
 }
 
+// クリップボード貼り付け処理
 function handlePasteImage(e) {
   const items = (e.clipboardData || e.originalEvent.clipboardData).items;
   for (const item of items) {
@@ -816,24 +817,85 @@ function handlePasteImage(e) {
   }
 }
 
-function processImageFile(file) {
-  if (!file.type.startsWith('image/')) {
+// クライアントサイド高速画像最適化（長辺1200px・JPEG品質80%に自動リサイズ・圧縮しタイムアウトとLocalStorage枯渇を完全根絶）
+function compressImageFile(file, maxDimension = 1200, quality = 0.8) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        // 長辺が maxDimension を超える場合のみ縮小（アスペクト比を完全維持）
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // JPEG形式で適正品質へ圧縮
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        const base64Data = dataUrl.split(',')[1];
+
+        resolve({
+          dataUrl: dataUrl,
+          base64: base64Data,
+          mimeType: 'image/jpeg'
+        });
+      };
+      img.onerror = () => {
+        // 画像読み込み失敗時の安全フォールバック
+        const rawBase64 = event.target.result.split(',')[1];
+        resolve({
+          dataUrl: event.target.result,
+          base64: rawBase64,
+          mimeType: file.type || 'image/jpeg'
+        });
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// 添付画像処理パイプライン
+async function processImageFile(file) {
+  if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|heic|bmp)$/i)) {
     setUnifiedStatus('warning', '画像（PNG, JPEG, WebP）のみ添付可能です', 'fa-triangle-exclamation', 4);
     return;
   }
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    const base64Data = event.target.result.split(',')[1];
+
+  setUnifiedStatus('info', '画像を最適化・圧縮中...', 'fa-compress', 2);
+
+  try {
+    const compressed = await compressImageFile(file, 1200, 0.8);
+
     state.currentAttachment = {
       name: file.name,
-      mimeType: file.type,
-      base64: base64Data
+      mimeType: compressed.mimeType,
+      base64: compressed.base64
     };
-    DOM.attachmentPreviewImg.src = event.target.result;
+
+    DOM.attachmentPreviewImg.src = compressed.dataUrl;
     DOM.attachmentName.textContent = file.name;
     DOM.attachmentPreviewContainer.style.display = 'flex';
-  };
-  reader.readAsDataURL(file);
+
+    setUnifiedStatus('ready', '画像を最適化して添付しました', 'fa-circle-check', 3);
+  } catch (err) {
+    console.error('Image compression error:', err);
+    setUnifiedStatus('danger', '画像の処理に失敗しました', 'fa-triangle-exclamation', 4);
+  }
 }
 
 function removeAttachment() {
@@ -1054,7 +1116,13 @@ async function handleSendMessage() {
   DOM.chatInput.value = '';
   autoResizeTextarea();
   removeAttachment();
-  localStorage.setItem(STORAGE_KEY_CHAT, JSON.stringify(state.chatHistory));
+
+  // LocalStorage容量制限への配慮
+  try {
+    localStorage.setItem(STORAGE_KEY_CHAT, JSON.stringify(state.chatHistory));
+  } catch (storageErr) {
+    console.warn('LocalStorage save failed (quota exceeded):', storageErr);
+  }
 
   setBusyLock(true, state.isSearchGroundingActive ? 'Google検索を交えて思考中...' : 'Geminiが回答を生成中...');
 
@@ -1073,7 +1141,12 @@ async function handleSendMessage() {
     );
 
     state.chatHistory.push({ role: 'model', text: apiResult.text });
-    localStorage.setItem(STORAGE_KEY_CHAT, JSON.stringify(state.chatHistory));
+    try {
+      localStorage.setItem(STORAGE_KEY_CHAT, JSON.stringify(state.chatHistory));
+    } catch (storageErr) {
+      console.warn('LocalStorage save failed:', storageErr);
+    }
+
     await appendMessageToDOM('model', apiResult.text, null, true);
 
     setUnifiedStatus('ready', '回答を受信しました', 'fa-circle-check', 3);
@@ -1092,10 +1165,14 @@ async function handleSendMessage() {
   }
 }
 
+// Gemini送信ペイロード構築（直近以外の超過去画像は送信不要としてペイロードを最適化）
 function buildGeminiContents(history) {
-  return history.map((msg) => {
+  const total = history.length;
+  return history.map((msg, index) => {
     const parts = [];
-    if (msg.image && msg.image.base64) {
+    // 直近3往復以内の画像のみAPIに送り、古い過去画像の無駄な再送を防止
+    const isRecent = (total - index) <= 6;
+    if (msg.image && msg.image.base64 && isRecent) {
       parts.push({
         inlineData: {
           mimeType: msg.image.mimeType,
