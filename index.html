@@ -1,9 +1,9 @@
-<!-- [稼働Ver 作業版 Rev.8] ヘッダーUI再配置（保存・復元・テーマ・ガイド・設定）、ステータス中央完全固定、3段階思考スタンスセレクタ追加 -->
+<!-- [稼働Ver 作業版 Rev.9] 正式版 v1.0.3、スマホ完全両対応タブバー配備、PC版完全不可侵、リストインデント＆Mermaid複数行文字切れ防止構造 -->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Dual Canvas & Chat</title>
   <link rel="stylesheet" href="style.css">
   <!-- フォント・アイコン -->
@@ -28,7 +28,7 @@
             <i class="fa-solid fa-shapes"></i>
           </div>
           <h1 class="header-title">Dual Canvas & Chat</h1>
-          <span class="version-badge">v1.0.2</span>
+          <span class="version-badge">v1.0.3</span>
         </div>
         <!-- 統合ステータスドック（タイトルの右側に安定配置、文字が伸縮してもタイトル位置は不変） -->
         <div id="unified-status-box" class="unified-status-box status-ready" title="システム状態">
@@ -42,11 +42,11 @@
       <div class="header-right">
         <!-- プロジェクト一括保存 -->
         <button id="btn-download-all" class="btn btn-sm btn-bundle-export" title="キャンバスとチャット全履歴をまとめて1つのMarkdownファイルに保存">
-          <i class="fa-solid fa-box-archive"></i> 一括保存
+          <i class="fa-solid fa-box-archive"></i> <span class="btn-text">一括保存</span>
         </button>
         <!-- プロジェクト復元（読込） -->
         <button id="btn-restore-session" class="btn btn-sm btn-secondary" title="過去に一括保存した.mdファイルを読み込み、キャンバスとチャットを完全復元">
-          <i class="fa-solid fa-folder-open"></i> 復元
+          <i class="fa-solid fa-folder-open"></i> <span class="btn-text">復元</span>
         </button>
         <input type="file" id="file-restore-input" accept=".md,text/markdown" style="display: none;">
 
@@ -62,20 +62,30 @@
 
         <!-- 操作ガイドモーダルボタン -->
         <button id="btn-open-guide" class="btn btn-secondary btn-guide" title="システム総合操作ガイドを開く">
-          <i class="fa-solid fa-book-open"></i> ガイド
+          <i class="fa-solid fa-book-open"></i> <span class="btn-text">ガイド</span>
         </button>
 
         <!-- API設定ボタン -->
         <button id="btn-open-settings" class="btn btn-secondary" title="APIキー設定">
-          <i class="fa-solid fa-gear"></i> 設定
+          <i class="fa-solid fa-gear"></i> <span class="btn-text">設定</span>
         </button>
       </div>
     </header>
 
-    <!-- メインコンテンツ（左右2カラム） -->
+    <!-- スマホ専用：画面切り替えタブバー（PC表示時は完全に非表示） -->
+    <nav class="mobile-tab-bar" aria-label="モバイル画面切り替え">
+      <button type="button" id="tab-btn-canvas" class="mobile-tab-btn" data-panel="canvas">
+        <i class="fa-solid fa-compass-drafting"></i> 思考キャンバス
+      </button>
+      <button type="button" id="tab-btn-chat" class="mobile-tab-btn active" data-panel="chat">
+        <i class="fa-solid fa-comments"></i> 壁打ちチャット
+      </button>
+    </nav>
+
+    <!-- メインコンテンツ（左右2カラム / スマホ時は1画面タブ切り替え） -->
     <main class="main-layout">
       <!-- 左画面：思考キャンバス -->
-      <section class="panel canvas-panel">
+      <section class="panel canvas-panel" id="panel-canvas">
         <div class="panel-header">
           <div class="panel-title">
             <div class="panel-icon-badge canvas-badge">
@@ -126,7 +136,7 @@
       </section>
 
       <!-- 右画面：壁打ちチャット -->
-      <section class="panel chat-panel">
+      <section class="panel chat-panel active-panel" id="panel-chat">
         <div class="panel-header">
           <div class="panel-title">
             <div class="panel-icon-badge chat-badge">
