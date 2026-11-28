@@ -1,4 +1,4 @@
-// [稼働Ver 作業版 Rev.14] 写真添付時の停止・タイムアウト完全根絶：長辺1200px自動圧縮パイプライン、LocalStorage枯渇防止、判断材料表自動生成維持
+// [稼働Ver 作業版 Rev.15] 正式版 v1.0.3：スマホ完全両対応タブ切り替え、Mermaid縦パディング拡張（3〜4行文字切れ完全根絶）、画像圧縮・判断材料表自動生成維持
 
 const PRIMARY_MODEL = 'gemini-3.5-flash-lite';
 const FALLBACK_MODEL = 'gemini-flash-lite-latest';
@@ -70,6 +70,12 @@ const DOM = {
   btnRestoreSession: document.getElementById('btn-restore-session'),
   fileRestoreInput: document.getElementById('file-restore-input'),
 
+  // モバイル専用タブ切替
+  tabBtnCanvas: document.getElementById('tab-btn-canvas'),
+  tabBtnChat: document.getElementById('tab-btn-chat'),
+  panelCanvas: document.getElementById('panel-canvas'),
+  panelChat: document.getElementById('panel-chat'),
+
   // ガイドモーダル
   guideModal: document.getElementById('guide-modal'),
   btnCloseGuide: document.getElementById('btn-close-guide'),
@@ -134,7 +140,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateReadyStatus();
 });
 
-// Mermaid.js 公式非破壊初期化（安全な標準テーマ適用＆文字潰れ防止）
+// Mermaid.js 公式非破壊初期化（安全な標準テーマ適用＆文字潰れ・文字切れ防止）
 function initMermaid() {
   if (typeof mermaid !== 'undefined') {
     mermaid.initialize({
@@ -149,7 +155,7 @@ function initMermaid() {
         nodeSpacing: 45,
         rankSpacing: 45,
         curve: 'basis',
-        padding: 16
+        padding: 24 /* 3〜4行テキスト時の縦方向クリップ完全防止 */
       },
       suppressErrorRendering: true
     });
@@ -233,6 +239,12 @@ function initEventListeners() {
   DOM.btnDownloadAll.addEventListener('click', downloadAllSessionAsMarkdown);
   DOM.btnRestoreSession.addEventListener('click', () => DOM.fileRestoreInput.click());
   DOM.fileRestoreInput.addEventListener('change', handleRestoreFileSelect);
+
+  // モバイル用タブ切り替え
+  if (DOM.tabBtnCanvas && DOM.tabBtnChat) {
+    DOM.tabBtnCanvas.addEventListener('click', () => switchMobilePanel('canvas'));
+    DOM.tabBtnChat.addEventListener('click', () => switchMobilePanel('chat'));
+  }
 
   DOM.selectTheme.addEventListener('change', (e) => {
     applyTheme(e.target.value);
@@ -318,6 +330,21 @@ function initEventListeners() {
     }
   });
   DOM.chatInput.addEventListener('input', autoResizeTextarea);
+}
+
+// モバイル用パネル切り替えヘルパー
+function switchMobilePanel(panelName) {
+  if (panelName === 'canvas') {
+    DOM.tabBtnCanvas.classList.add('active');
+    DOM.tabBtnChat.classList.remove('active');
+    DOM.panelCanvas.classList.add('active-panel');
+    DOM.panelChat.classList.remove('active-panel');
+  } else {
+    DOM.tabBtnChat.classList.add('active');
+    DOM.tabBtnCanvas.classList.remove('active');
+    DOM.panelChat.classList.add('active-panel');
+    DOM.panelCanvas.classList.remove('active-panel');
+  }
 }
 
 // 過去逆戻り防止付き基準年月の動的算出（2026年11月を下限ガード）
@@ -524,7 +551,7 @@ function sanitizeMermaidCode(rawText) {
   let clean = unescapeHtml(rawText);
   clean = clean.replace(/^```mermaid\s*/i, '').replace(/```$/i, '').trim();
 
-  // 視認性を破壊するインラインclassDefやstyleの指定を完全除去（システムの高コントラストCSSを優先）
+  // 視認性を破壊するインラインclassDefやstyleの指定を完全除去
   clean = clean.replace(/classDef\s+[\s\S]*?(?=[\r\n]|$)/gi, '');
   clean = clean.replace(/class\s+[\s\S]*?(?=[\r\n]|$)/gi, '');
   clean = clean.replace(/style\s+[\s\S]*?(?=[\r\n]|$)/gi, '');
@@ -817,7 +844,7 @@ function handlePasteImage(e) {
   }
 }
 
-// クライアントサイド高速画像最適化（長辺1200px・JPEG品質80%に自動リサイズ・圧縮しタイムアウトとLocalStorage枯渇を完全根絶）
+// クライアントサイド高速画像最適化（長辺1200px・JPEG品質80%に自動リサイズ・圧縮）
 function compressImageFile(file, maxDimension = 1200, quality = 0.8) {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -844,7 +871,6 @@ function compressImageFile(file, maxDimension = 1200, quality = 0.8) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // JPEG形式で適正品質へ圧縮
         const dataUrl = canvas.toDataURL('image/jpeg', quality);
         const base64Data = dataUrl.split(',')[1];
 
@@ -855,7 +881,6 @@ function compressImageFile(file, maxDimension = 1200, quality = 0.8) {
         });
       };
       img.onerror = () => {
-        // 画像読み込み失敗時の安全フォールバック
         const rawBase64 = event.target.result.split(',')[1];
         resolve({
           dataUrl: event.target.result,
@@ -1117,7 +1142,6 @@ async function handleSendMessage() {
   autoResizeTextarea();
   removeAttachment();
 
-  // LocalStorage容量制限への配慮
   try {
     localStorage.setItem(STORAGE_KEY_CHAT, JSON.stringify(state.chatHistory));
   } catch (storageErr) {
@@ -1165,12 +1189,11 @@ async function handleSendMessage() {
   }
 }
 
-// Gemini送信ペイロード構築（直近以外の超過去画像は送信不要としてペイロードを最適化）
+// Gemini送信ペイロード構築
 function buildGeminiContents(history) {
   const total = history.length;
   return history.map((msg, index) => {
     const parts = [];
-    // 直近3往復以内の画像のみAPIに送り、古い過去画像の無駄な再送を防止
     const isRecent = (total - index) <= 6;
     if (msg.image && msg.image.base64 && isRecent) {
       parts.push({
@@ -1311,12 +1334,10 @@ function extractVisualArtifactsFromChat(chatHistory) {
   let latestMermaid = null;
   const collectedTables = [];
 
-  // 直近のモデルメッセージから順に走査
   for (let i = chatHistory.length - 1; i >= 0; i--) {
     const msg = chatHistory[i];
     if (msg.role !== 'model' || !msg.text) continue;
 
-    // Mermaid図の回収（まだ拾っていなければ回収）
     if (!latestMermaid) {
       const mermaidMatch = msg.text.match(/```[\s]*mermaid[\r\n]+([\s\S]*?)```/i);
       if (mermaidMatch) {
@@ -1324,14 +1345,12 @@ function extractVisualArtifactsFromChat(chatHistory) {
       }
     }
 
-    // チャット内のすべてのMarkdown表を漏れなく全件抽出
     const tableRegex = /\|(.+)\|[\r\n]+\|[-:| ]+\|[\r\n]+((?:\|.+[\r\n]*)+)/g;
     let tableMatch;
     while ((tableMatch = tableRegex.exec(msg.text)) !== null) {
       const fullTable = tableMatch[0].trim();
-      // 重複登録の防止
       if (!collectedTables.some(t => t.includes(tableMatch[1].trim()))) {
-        collectedTables.unshift(fullTable); // 時系列順（古いものが上、新しいものが下）に整列
+        collectedTables.unshift(fullTable);
       }
     }
   }
@@ -1339,7 +1358,7 @@ function extractVisualArtifactsFromChat(chatHistory) {
   return { mermaid: latestMermaid, tables: collectedTables };
 }
 
-// 思考キャンバス 統合更新パイプライン（ユーザー主権・判断ナビゲーション型）
+// 思考キャンバス 統合更新パイプライン
 async function updateCanvasFromAI(isManual = false) {
   if (state.chatHistory.length === 0) {
     if (isManual) {
@@ -1360,7 +1379,7 @@ async function updateCanvasFromAI(isManual = false) {
 
     const conversationLog = state.chatHistory.map((m) => `${m.role === 'user' ? 'ユーザー' : 'Gemini'}: ${m.text}`).join('\n\n');
 
-    // 1. 論理テキスト生成（ユーザーの意思決定プロセスを尊重し、勝手な決定を一切排除）
+    // 1. 論理テキスト生成
     const logicPrompt = `これまでの会話ログを分析し、ユーザーが「何をどういう順番で決めるべきか」の検討状況を整理してください。ユーザーが決めていない提案を勝手に決定事項に含めてはなりません。\n\n【会話ログ】:\n${conversationLog}`;
     const logicResult = await callGeminiAPI(
       [{ role: 'user', parts: [{ text: logicPrompt }] }],
@@ -1372,7 +1391,6 @@ async function updateCanvasFromAI(isManual = false) {
     const logicMarkdown = logicResult.text.trim();
 
     // 2. 検討手順フローチャート（ロードマップ）の構築
-    // チャットから既存Mermaidがあるか確認し、ない場合は「意思決定の手順（Step 1→2→3）」のフローチャートを作成
     const artifacts = extractVisualArtifactsFromChat(state.chatHistory);
     let roadmapMermaid = artifacts.mermaid;
 
@@ -1392,12 +1410,10 @@ async function updateCanvasFromAI(isManual = false) {
     }
 
     // 3. 判断材料・比較表セクションの構築
-    // チャット内の実在テーブルを最優先回収し、未存在の場合は会話文脈から客観的比較表をフォールバック自動生成
     let tablesMarkdown = '';
     if (artifacts.tables && artifacts.tables.length > 0) {
       tablesMarkdown = artifacts.tables.join('\n\n');
     } else {
-      // チャット内にまだMarkdownテーブルがない場合のフォールバック自動生成
       await ensureRateLimitInterval();
       const tableFallbackPrompt = `以下の会話ログを分析し、ユーザーが客観的な判断を下すための「判断材料・比較表」をMarkdownの表（Table）形式で作成してください。
 （例：選択肢の比較、メリット・デメリット、難易度・費用・所要時間、原因別の切り分け基準など、会話の主題に最も適した比較表を作成）
@@ -1422,7 +1438,7 @@ async function updateCanvasFromAI(isManual = false) {
       }
     }
 
-    // 4. キャンバス全体の再構築（見える化・判断ナビゲーション型）
+    // 4. キャンバス全体の再構築
     let finalCanvasMarkdown = '# 思考キャンバス\n\n';
 
     const goalSection = extractSection(logicMarkdown, '【現在の目的・ゴール】');
