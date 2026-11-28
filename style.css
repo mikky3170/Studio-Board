@@ -1,4 +1,4 @@
-/* [稼働Ver 作業版 Rev.11] Mermaid全テーマ高コントラスト視認性完全保証、配色潰れ根絶CSS */
+/* [稼働Ver 作業版 Rev.12] スマホ完全両対応レスポンシブCSS、リスト項目インデント適正化、Mermaid複数行（3〜4行）文字切れ完全根絶 */
 
 :root {
   /* ========================================================
@@ -185,6 +185,7 @@ body {
   background-color: var(--bg-app);
   color: var(--text-main);
   height: 100vh;
+  height: 100dvh; /* モバイルのキーボード対応 */
   overflow: hidden;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -196,8 +197,10 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   background: var(--bg-app);
+  overflow: hidden;
 }
 
 /* ========================================================
@@ -214,6 +217,7 @@ body {
   backdrop-filter: blur(18px);
   z-index: 100;
   position: relative;
+  flex-shrink: 0;
 }
 
 .header-left {
@@ -438,7 +442,46 @@ body.theme-pop .theme-selector-box {
   border-color: var(--accent-canvas);
 }
 
-/* メイン 2カラム レイアウト */
+/* ========================================================
+   スマホ専用：画面切り替えタブバー（PCでは完全非表示）
+   ======================================================== */
+.mobile-tab-bar {
+  display: none; /* デフォルト（PC）では影も形も存在しない */
+  width: 100%;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-medium);
+  padding: 4px 10px;
+  gap: 8px;
+  z-index: 90;
+  flex-shrink: 0;
+}
+
+.mobile-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-family: var(--font-sans);
+  font-size: 0.86rem;
+  font-weight: 700;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mobile-tab-btn.active {
+  background: var(--accent-primary);
+  color: #ffffff;
+  border-color: var(--accent-primary);
+  box-shadow: var(--shadow-button-primary);
+}
+
+/* メイン 2カラム レイアウト（PC表示） */
 .main-layout {
   display: grid;
   grid-template-columns: 50% 50%;
@@ -516,6 +559,7 @@ body.theme-pop .theme-selector-box {
   backdrop-filter: blur(14px);
   min-height: 56px;
   z-index: 10;
+  flex-shrink: 0;
 }
 
 .panel-title {
@@ -750,7 +794,9 @@ input:checked + .slider { background-color: var(--accent-primary); }
 .switch-search input:checked + .slider { background-color: #0891b2; }
 input:checked + .slider:before { transform: translateX(14px); }
 
-/* Markdown レンダリング */
+/* ========================================================
+   Markdown レンダリング（リストインデント位置適正化）
+   ======================================================== */
 .markdown-body {
   color: var(--text-main);
   font-size: 0.95rem;
@@ -777,8 +823,28 @@ input:checked + .slider:before { transform: translateX(14px); }
   color: var(--accent-secondary);
 }
 .markdown-body p { margin-bottom: 14px; }
-.markdown-body ul, .markdown-body ol { padding-left: 22px; margin-bottom: 14px; }
-.markdown-body li { margin-bottom: 6px; }
+
+/* リスト階層のインデントを最適化（黒点・白点が左すぎる問題を完全解消） */
+.markdown-body ul, .markdown-body ol {
+  padding-left: 28px;
+  margin-bottom: 14px;
+}
+.markdown-body li {
+  margin-bottom: 6px;
+  line-height: 1.7;
+}
+.markdown-body li > p {
+  margin-bottom: 6px;
+}
+/* ネストされた子リストの字下げをより明確に */
+.markdown-body ul ul,
+.markdown-body ol ul,
+.markdown-body ul ol,
+.markdown-body ol ol {
+  padding-left: 24px;
+  margin-top: 5px;
+  margin-bottom: 6px;
+}
 
 .markdown-body blockquote {
   border-left: 4px solid var(--accent-secondary);
@@ -853,7 +919,7 @@ body.theme-pop .markdown-body th {
 }
 
 /* ========================================================
-   Mermaid 高コントラスト視認性完全保証スタイル
+   Mermaid 高コントラスト視認性 ＆ 複数行（3〜4行）文字切れ完全根絶スタイル
    ======================================================== */
 .mermaid-wrapper {
   position: relative;
@@ -868,6 +934,7 @@ body.theme-pop .markdown-body th {
   display: flex;
   justify-content: center;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* SVG全体の描画領域を外側へ自然に解放 */
@@ -886,7 +953,7 @@ body.theme-pop .markdown-body th {
   overflow: visible !important;
 }
 
-/* 全テーマでの高コントラスト文字色・背景色強制補正（ピンク潰れ等の完全防止） */
+/* 全テーマでの高コントラスト文字色・背景色強制補正 */
 .mermaid .node rect,
 .mermaid .node polygon,
 .mermaid .node circle {
@@ -919,17 +986,21 @@ body.theme-pop .markdown-body th {
   font-weight: 600 !important;
 }
 
-/* ノード内部テキストの適切な行間と自然なパディング確保 */
+/* ノード内部テキストの3〜4行改行時における文字切れ・切断完全防止 */
 .mermaid .node foreignObject {
   overflow: visible !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 .mermaid .node foreignObject div {
-  line-height: 1.4 !important;
-  padding: 4px 8px !important;
+  line-height: 1.35 !important; /* 黄金比の行間 */
+  padding: 2px 6px !important;
   text-align: center !important;
   word-break: break-word !important;
   box-sizing: border-box !important;
+  display: block !important;
 }
 
 .btn-zoom-diagram {
@@ -1165,12 +1236,14 @@ body.theme-pop .btn-zoom-diagram {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex-shrink: 0;
 }
 .quick-chips-wrapper {
   display: flex;
   align-items: center;
   gap: 10px;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .quick-chips-guide {
   font-size: 0.74rem;
@@ -1183,6 +1256,7 @@ body.theme-pop .btn-zoom-diagram {
   gap: 8px;
   overflow-x: auto;
   padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
 }
 .quick-chip {
   display: inline-flex;
@@ -1660,4 +1734,145 @@ body.theme-pop .model-info-box {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.5);
+}
+
+/* ========================================================
+   スマホ専用 レスポンシブスタイル（PC表示完全不可侵）
+   ======================================================== */
+@media (max-width: 768px) {
+  :root {
+    --header-height: 52px;
+  }
+
+  .app-header {
+    padding: 0 12px;
+  }
+
+  .header-left {
+    display: none;
+  }
+
+  /* 中央タイトルとステータスをコンパクト化 */
+  .header-center {
+    position: static;
+    transform: none;
+    gap: 8px;
+  }
+
+  .brand-logo-glow {
+    width: 28px;
+    height: 28px;
+    font-size: 0.95rem;
+  }
+
+  .header-title {
+    font-size: 0.96rem;
+  }
+
+  .version-badge {
+    display: none; /* スマホ幅では非表示にして省スペース化 */
+  }
+
+  .unified-status-box {
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    max-width: 130px;
+  }
+
+  /* 右側ボタングループの省スペース化（テキストを隠しアイコン中心に） */
+  .header-right {
+    gap: 5px;
+  }
+
+  .header-right .btn .btn-text {
+    display: none;
+  }
+
+  .header-right .btn {
+    padding: 6px 8px;
+  }
+
+  .theme-selector-box {
+    padding: 4px 6px;
+  }
+
+  .theme-select {
+    font-size: 0.72rem;
+  }
+
+  /* スマホ専用タブバーの表示 */
+  .mobile-tab-bar {
+    display: flex;
+  }
+
+  /* メインレイアウトを1画面に切り替え */
+  .main-layout {
+    grid-template-columns: 100%;
+  }
+
+  /* 非アクティブなパネルを非表示 */
+  .panel:not(.active-panel) {
+    display: none !important;
+  }
+
+  .panel.active-panel {
+    display: flex !important;
+    width: 100%;
+  }
+
+  .canvas-panel {
+    border-right: none;
+  }
+
+  .canvas-body {
+    padding: 16px 14px;
+  }
+
+  .chat-messages {
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .chat-bubble-container {
+    max-width: 95%;
+  }
+
+  .chat-bubble {
+    padding: 12px 14px;
+    font-size: 0.9rem;
+  }
+
+  .panel-header {
+    padding: 8px 12px;
+    min-height: 48px;
+  }
+
+  .panel-title h2 {
+    font-size: 0.88rem;
+  }
+
+  .panel-controls {
+    gap: 4px;
+  }
+
+  .panel-controls .toggle-control .toggle-label {
+    display: none;
+  }
+
+  /* iOS Safariの自動ズーム防止：入力欄フォントサイズをジャスト16pxに */
+  .chat-input {
+    font-size: 16px !important;
+  }
+
+  .chat-input-area {
+    padding: 8px 10px 12px;
+  }
+
+  .quick-chips-wrapper {
+    gap: 6px;
+  }
+
+  .quick-chips-guide {
+    display: none;
+  }
 }
